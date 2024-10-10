@@ -1,0 +1,37 @@
+     .aneh-container {
+   }
+
+   .aneh-button {
+      padding: 8px 12px; /* Smaller padding for a smaller button */
+      background-color: #007bff;
+      color: white;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 14px; /* Smaller font size */
+      margin: 10px auto 0; /* Top margin, auto for left and right */
+      width: auto; /* Allow the button width to wrap */
+      transition: background-color 0.3s;
+   }
+
+   .aneh-button.active {
+      background-color: #004085; /* Active color */
+      cursor: not-allowed;
+   }
+
+   .aneh-button:hover {
+      background-color: #0056b3;
+   }
+   
+   
+     #aneh-player {
+      width: auto; /* Default width */
+      height: 360px; /* Default height for desktop */
+   }
+
+   @media (max-width: 600px) { /* Adjust based on your mobile breakpoint */
+      #aneh-player {
+         width: 290px; /* Width for mobile */
+         height: 360px; /* Height remains the same */
+      }
+   }
