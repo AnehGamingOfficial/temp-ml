@@ -1,0 +1,112 @@
+-- Game Guardian Lua Script: Modify GetMaxAirJumpCount (libil2cpp.so)
+-- Target Method: public System.Int32 GetMaxAirJumpCount(System.Boolean check); // 0x4FF590C
+-- This script hooks the method and forces return value to a high number (e.g., 999)
+
+gg.setVisible(false)
+
+-- Configuration
+local METHOD_OFFSET = 0x4FF590C  -- Offset of the method in libil2cpp.so
+local DESIRED_JUMP_COUNT = 999   -- Change this to your desired max air jumps
+
+-- Get libil2cpp.so base address
+function getLibBase()
+    local ranges = gg.getRangesList("libil2cpp.so")
+    if #ranges == 0 then
+        gg.alert("Error: libil2cpp.so not found! Make sure the game is running.")
+        os.exit()
+    end
+    return ranges[1].start
+end
+
+-- Main function
+function main()
+    local libBase = getLibBase()
+    local methodAddress = libBase + METHOD_OFFSET
+
+    gg.toast("libil2cpp.so base: " .. string.format("0x%X", libBase))
+    gg.toast("Target method address: " .. string.format("0x%X", methodAddress))
+
+    -- Verify if the address is readable
+    if not gg.getValues({{address = methodAddress, flags = gg.TYPE_BYTE}})[1].value then
+        gg.alert("Failed to read memory at method address. Wrong offset or region?")
+        return
+    end
+
+    -- Create AOB scan around the method to find function prologue (optional safety)
+    -- But we'll directly patch return value using register manipulation
+
+    -- IL2CPP method hook via register override (ARM64 assumed)
+    -- Most IL2CPP methods return int in W0 (32-bit) or X0 (64-bit)
+    -- We'll inject a simple patch to force return DESIRED_JUMP_COUNT
+
+    -- Search for the method entry using AOB (first 16 bytes as signature)
+    gg.setRanges(gg.REGION_CODE_APP)
+    local searchAddr = methodAddress - 8  -- Start a bit before
+    local aob = gg.getValues({
+        {address = searchAddr, flags = gg.TYPE_BYTE},
+        {address = searchAddr + 1, flags = gg.TYPE_BYTE},
+        {address = searchAddr + 2, flags = gg.TYPE_BYTE},
+        {address = searchAddr + 3, flags = gg.TYPE_BYTE},
+        {address = searchAddr + 4, flags = gg.TYPE_BYTE},
+        {address = searchAddr + 5, flags = gg.TYPE_BYTE},
+        {address = searchAddr + 6, flags = gg.TYPE_BYTE},
+        {address = searchAddr + 7, flags = gg.TYPE_BYTE},
+        {address = searchAddr + 8, flags = gg.TYPE_BYTE},
+        {address = searchAddr + 9, flags = gg.TYPE_BYTE},
+        {address = searchAddr + 10, flags = gg.TYPE_BYTE},
+        {address = searchAddr + 11, flags = gg.TYPE_BYTE},
+        {address = searchAddr + 12, flags = gg.TYPE_BYTE},
+        {address = searchAddr + 13, flags = gg.TYPE_BYTE},
+        {address = searchAddr + 14, flags = gg.TYPE_BYTE},
+        {address = searchAddr + 15, flags = gg.TYPE_BYTE}
+    })
+
+    local pattern = ""
+    for i, v in ipairs(aob) do
+        pattern = pattern .. string.format("%02X ", v.value & 0xFF)
+    end
+    gg.toast("Method prologue pattern: " .. pattern)
+
+    -- Direct patch: Replace method body with MOV W0, #DESIRED + RET
+    -- ARM64: mov w0, #imm16  => 0x52800000 | (imm16 << 5)
+    -- ret                 => 0xD65F03C0
+
+    local imm16 = DESIRED_JUMP_COUNT
+    if imm16 > 0xFFFF then
+        gg.alert("Warning: Value too large for 16-bit MOV. Using 999.")
+        imm16 = 999
+    end
+
+    local mov_inst = 0x52800000 + (imm16 << 5)  -- MOV W0, #imm16
+    local ret_inst = 0xD65F03C0                 -- RET
+
+    -- Write instructions at method address
+    gg.setValues({
+        {address = methodAddress,     flags = gg.TYPE_DWORD, value = mov_inst},
+        {address = methodAddress + 4, flags = gg.TYPE_DWORD, value = ret_inst}
+    })
+
+    gg.toast(string.format("Patched! GetMaxAirJumpCount now always returns %d", imm16))
+    gg.alert("Success: Unlimited Air Jumps Applied!\n\nMethod at 0x" .. string.format("%X", methodAddress) .. "\nNow returns: " .. imm16)
+end
+
+-- Run
+main()
+
+-- Optional: Add menu to change value later
+local menu = gg.choice({
+    "Change Jump Count",
+    "Restore Original",
+    "Exit"
+}, nil, "Air Jump Modifier")
+
+if menu == 1 then
+    local input = gg.prompt({"Enter new max air jumps (1-65535):"}, {999}, {"number"})
+    if input then
+        DESIRED_JUMP_COUNT = input[1]
+        if DESIRED_JUMP_COUNT > 65535 then DESIRED_JUMP_COUNT = 65535 end
+        main()
+    end
+elseif menu == 2 then
+    gg.alert("Restore not implemented. Restart game to undo.")
+end
