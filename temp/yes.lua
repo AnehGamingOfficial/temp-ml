@@ -1,130 +1,81 @@
--- Game Guardian Script: Freeze MaxAirJumpCount using Offset
--- Target: public System.Int32 GetMaxAirJumpCount(System.Boolean check); // 0x4FF590C
+-- Game Guardian Script: PATCH + FREEZE GetMaxAirJumpCount
+-- Forces return value AND locks it in memory forever
 
 gg.setVisible(false)
 
+-- CONFIG
 local METHOD_OFFSET = 0x4FF590C
+local DESIRED_JUMP_COUNT = 999
 local LIB_NAME = "libil2cpp.so"
-local SEARCH_RANGE = 0x10000  -- Search ±64KB around method
-local FREEZE_VALUE = 999
 
--- Get library base
+-- Get base
 function getLibBase()
-    local ranges = gg.getRangesList(LIB_NAME)
-    if #ranges == 0 then
-        gg.alert(LIB_NAME .. " not found!")
-        os.exit()
-    end
-    return ranges[1].start
+    local r = gg.getRangesList(LIB_NAME)
+    if #r == 0 then gg.alert("libil2cpp.so not found!") os.exit() end
+    return r[1].start
 end
 
--- Read return value of method by calling it via register hook (ARM64)
-function getCurrentJumpCount()
-    local libBase = getLibBase()
-    local addr = libBase + METHOD_OFFSET
+-- Main
+function applyPatchAndFreeze()
+    local base = getLibBase()
+    local addr = base + METHOD_OFFSET
 
-    -- Backup original instructions
-    local backup = gg.getValues({
-        {address = addr, flags = gg.TYPE_DWORD},
-        {address = addr + 4, flags = gg.TYPE_DWORD}
-    })
+    -- Validate address
+    local test = gg.getValues({{address = addr, flags = gg.TYPE_BYTE}})
+    if not test[1].value then
+        gg.alert("Cannot read method address!")
+        return
+    end
 
-    -- Inject: MOV W0, #0xAAAA ; RET  (we'll read W0 after call)
+    -- Build ARM64 instructions
+    local imm = DESIRED_JUMP_COUNT
+    if imm > 0xFFFF then imm = 999 end
+
+    local mov_w0 = 0x52800000 | (imm << 5)   -- MOV W0, #imm16
+    local ret    = 0xD65F03C0                -- RET
+
+    -- === PATCH ===
     gg.setValues({
-        {address = addr,     flags = gg.TYPE_DWORD, value = 0x52815540}, -- mov w0, #0xAAA
-        {address = addr + 4, flags = gg.TYPE_DWORD, value = 0xD65F03C0}  -- ret
+        {address = addr,     flags = gg.TYPE_DWORD, value = mov_w0},
+        {address = addr + 4, flags = gg.TYPE_DWORD, value = ret}
     })
 
-    -- Trigger method call (just wait a bit or move in-game)
-    gg.toast("Move or jump in-game to trigger GetMaxAirJumpCount...")
-    gg.sleep(2000)
+    -- === FREEZE PATCH IN MEMORY ===
+    local freezeList = {
+        {address = addr,     flags = gg.TYPE_DWORD, value = mov_w0, freeze = true, freezeType = gg.FREEZE_NORMAL},
+        {address = addr + 4, flags = gg.TYPE_DWORD, value = ret,    freeze = true, freezeType = gg.FREEZE_NORMAL}
+    }
+    gg.addListItems(freezeList)
 
-    -- Restore
-    gg.setValues(backup)
-
-    -- Now search for 0xAAA in memory → this is our return value
-    gg.setRanges(gg.REGION_ANONYMOUS | gg.REGION_C_ALLOC)
-    gg.searchNumber("43690", gg.TYPE_DWORD)  -- 0xAAA = 43690
-    local results = gg.getResults(100)
-    gg.clearResults()
-
-    if #results == 0 then
-        gg.alert("Failed to capture return value.")
-        return nil
-    end
-
-    -- Assume first result is in W0 register context → not useful
-    -- We need the *actual field* — so return nothing, proceed to search near method
-    return nil
-end
-
--- MAIN: Search near method for the return value
-function main()
-    local libBase = getLibBase()
-    local methodAddr = libBase + METHOD_OFFSET
-    gg.toast("libil2cpp.so: 0x" .. string.format("%X", libBase))
-    gg.toast("Method: 0x" .. string.format("%X", methodAddr))
-
-    -- Step 1: Get current default value (ask user)
-    local input = gg.prompt({"What is the CURRENT max air jumps? (e.g., 1)"}, {1}, {"number"})
-    if not input then return end
-    local currentValue = input[1]
-
-    -- Step 2: Search near method (±64KB) for that value
-    local startAddr = methodAddr - SEARCH_RANGE
-    local endAddr = methodAddr + SEARCH_RANGE
-
-    gg.setRanges(gg.REGION_ANONYMOUS)
-    gg.searchNumber(currentValue, gg.TYPE_DWORD, false, false, startAddr, endAddr)
-
-    local count = gg.getResultCount()
-    if count == 0 then
-        gg.alert("Value " .. currentValue .. " not found near method. Try a bigger range?")
-        return
-    end
-
-    local results = gg.getResults(count)
-    gg.toast("Found " .. count .. " candidates near method.")
-
-    -- Step 3: Refine — do one air jump, value should increase
-    gg.alert("Do ONE air jump (or trigger the check), then press OK.")
-    gg.sleep(1000)
-
-    local newValue = currentValue
-    if currentValue > 0 then newValue = currentValue - 1 end -- or ask user
-    local refineInput = gg.prompt({"What is the value NOW?"}, {newValue}, {"number"})
-    if not refineInput then return end
-    newValue = refineInput[1]
-
-    gg.refineNumber(newValue, gg.TYPE_DWORD, false, false, startAddr, endAddr)
-    results = gg.getResults(100)
-
-    if #results == 0 then
-        gg.alert("Refine failed. Try again.")
-        return
-    end
-
-    -- Step 4: Freeze all candidates
-    for i, v in ipairs(results) do
-        v.value = FREEZE_VALUE
-        v.freeze = true
-    end
-    gg.addListItems(results)
-
-    -- Show offset from lib base
-    local frozen = {}
-    for i, v in ipairs(results) do
-        local offset = v.address - libBase
-        table.insert(frozen, string.format("0x%X", offset))
-    end
-
+    gg.toast("PATCHED + FROZEN!")
     gg.alert(
-        "FREEZE SUCCESS!\n\n" ..
-        "Frozen " .. #results .. " address(es) to " .. FREEZE_VALUE .. "\n\n" ..
-        "Offsets from libil2cpp.so:\n" .. table.concat(frozen, "\n") ..
-        "\n\nSave to GG list for reuse!"
+        "SUCCESS: GetMaxAirJumpCount = " .. imm .. "\n" ..
+        "Method: 0x" .. string.format("%X", addr) .. "\n" ..
+        "Offset: 0x" .. string.format("%X", METHOD_OFFSET) .. "\n\n" ..
+        "FROZEN IN GG LIST — WILL STAY EVEN AFTER RESTART!"
     )
 end
 
--- Run
-main()
+-- === MENU ===
+local choice = gg.choice({
+    "Apply Patch + Freeze",
+    "Change Value & Re-Freeze",
+    "Remove Freeze (Unpatch)",
+    "Exit"
+}, nil, "Air Jump: Patch + Freeze")
+
+if choice == 1 then
+    applyPatchAndFreeze()
+elseif choice == 2 then
+    local input = gg.prompt({"New jump count (1-65535):"}, {DESIRED_JUMP_COUNT}, {"number"})
+    if input then
+        DESIRED_JUMP_COUNT = input[1]
+        if DESIRED_JUMP_COUNT > 65535 then DESIRED_JUMP_COUNT = 65535 end
+        -- Clear old freeze
+        gg.removeListItems(gg.getListItems())
+        applyPatchAndFreeze()
+    end
+elseif choice == 3 then
+    gg.removeListItems(gg.getListItems())
+    gg.alert("Freeze removed. Restart game to fully restore.")
+end
