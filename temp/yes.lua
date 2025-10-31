@@ -1,40 +1,53 @@
--- Game Guardian Script: PATCH + FREEZE GetMaxAirJumpCount
--- Forces return value AND locks it in memory forever
+LibBaseAnogs = gg.getRangesList("libanogs.so")
+if #LibBaseAnogs == 0 then return end
 
-gg.setVisible(false)
+ListOffsetsAnogs = {
+    0x00515e40,  -- gettimeofday
+}
 
--- CONFIG
-local METHOD_OFFSET = 0x4FF590C
-local DESIRED_JUMP_COUNT = 999
-local LIB_NAME = "libil2cpp.so"
-
--- Get base
-function getLibBase()
-    local r = gg.getRangesList(LIB_NAME)
-    if #r == 0 then gg.alert("libil2cpp.so not found!") os.exit() end
-    return r[1].start
+for i = 1, #ListOffsetsAnogs do
+    gg.setValues({
+        {
+            address = LibBaseAnogs[1].start + ListOffsetsAnogs[i],
+            flags = gg.TYPE_QWORD,
+            value = "h 00 00 80 D2 C0 03 5F D6"
+        }
+    })
 end
 
--- Main
-function applyPatchAndFreeze()
-    local base = getLibBase()
-    local addr = base + METHOD_OFFSET
+LibBaseAnort = gg.getRangesList("libanort.so")
+if #LibBaseAnort == 0 then return end
 
-    -- Validate address
-    local test = gg.getValues({{address = addr, flags = gg.TYPE_BYTE}})
-    if not test[1].value then
-        gg.alert("Cannot read method address!")
-        return
-    end
+ListOffsetsAnort = {
+    0x00193880,  -- gettimeofday
+}
 
-    -- Build ARM64 instructions
-    local imm = DESIRED_JUMP_COUNT
-    if imm > 0xFFFF then imm = 999 end
+for i = 1, #ListOffsetsAnort do
+    gg.setValues({
+        {
+            address = LibBaseAnort[1].start + ListOffsetsAnort[i],
+            flags = gg.TYPE_QWORD,
+            value = "h 00 00 80 D2 C0 03 5F D6"
+        }
+    })
+end
 
-    local mov_w0 = 0x52800000 | (imm << 5)   -- MOV W0, #imm16
-    local ret    = 0xD65F03C0                -- RET
-
-    -- === PATCH ===
+gg.clearResults()
+gg.setRanges(gg.REGION_ANONYMOUS)
+gg.searchNumber("-15.125", 16)
+local results = gg.getResults(gg.getResultsCount())
+gg.clearResults()
+local t = {}
+for i = 1, #results do
+    t[i] = {flags = 16, address = results[i].address - 0x84}
+end
+gg.loadResults(t)
+gg.getResults(gg.getResultsCount())
+gg.refineNumber("5", 16)
+gg.getResults(gg.getResultsCount())
+gg.editAll("750", 16)
+gg.clearResults()
+Anti FC + High Jump by GG    -- === PATCH ===
     gg.setValues({
         {address = addr,     flags = gg.TYPE_DWORD, value = mov_w0},
         {address = addr + 4, flags = gg.TYPE_DWORD, value = ret}
