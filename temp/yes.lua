@@ -46,6 +46,18 @@ gg.getResults(gg.getResultsCount())
 gg.refineNumber("5", 16)
 gg.getResults(gg.getResultsCount())
 gg.editAll("750", 16)
+gg.clearResults()gg.searchNumber("-15.125", 16)
+local results = gg.getResults(gg.getResultsCount())
+gg.clearResults()
+local t = {}
+for i = 1, #results do
+    t[i] = {flags = 16, address = results[i].address - 0x84}
+end
+gg.loadResults(t)
+gg.getResults(gg.getResultsCount())
+gg.refineNumber("5", 16)
+gg.getResults(gg.getResultsCount())
+gg.editAll("750", 16)
 gg.clearResults()
 Anti FC + High Jump by GG    -- === PATCH ===
     gg.setValues({
